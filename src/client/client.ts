@@ -4,7 +4,9 @@ import Stats from 'three/examples/jsm/libs/stats.module.js'
 import {GUI} from 'dat.gui'
 import {OutlineEffect} from 'three/examples/jsm/effects/OutlineEffect'
 
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
+
+import { TWEEN } from 'three/examples/jsm/libs/tween.module.min'
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x8E8B8B) // solid color
@@ -48,13 +50,18 @@ directionalLight.castShadow = true
 directionalLight.shadow.mapSize.width = 4096
 directionalLight.shadow.mapSize.height = 4096
 directionalLight.shadow.camera.near = 0.1
-directionalLight.shadow.camera.far = 15
-directionalLight.shadow.camera.top = 8
+directionalLight.shadow.camera.far = 100
+directionalLight.shadow.camera.left = -100
+directionalLight.shadow.camera.right = 100
+directionalLight.shadow.camera.top = 100
+directionalLight.shadow.camera.bottom = -100
 scene.add(directionalLight)
 directionalLight.position.set(-4,5,3)
 
 // const helper = new THREE.CameraHelper(directionalLight.shadow.camera)
 // scene.add(helper)
+
+const sceneMeshes : THREE.Mesh[] = []
 
 const camera = new THREE.PerspectiveCamera(
     45,
@@ -95,6 +102,11 @@ const toonmaterial: THREE.MeshToonMaterial = new THREE.MeshToonMaterial({
     gradientMap: fiveTone,
 })
 
+const toonjointmaterial: THREE.MeshToonMaterial = new THREE.MeshToonMaterial({
+  color: 0X1C5B72,
+  gradientMap: fiveTone,
+})
+
 const cube = new THREE.Mesh(geometry, toonmaterial)
 scene.add(cube)
 cube.position.x = -3
@@ -116,35 +128,126 @@ scene.add(plane)
 plane.rotation.set(-Math.PI/2,0,0)
 plane.position.y = -1.5
 plane.receiveShadow = true
-
-const fbxLoader = new FBXLoader()
+sceneMeshes.push(plane)
 
 let mixer: THREE.AnimationMixer
-let action
-fbxLoader.load('models/FemaleWalking.fbx', function (model) {
-  model.traverse(function(child){
-    if ((child as THREE.Mesh).isMesh) {
+let modelReady = false
+let modelMesh = new THREE.Object3D
+const animationActions: THREE.AnimationAction[] = []
+let activeAction: THREE.AnimationAction
+let lastAction: THREE.AnimationAction
+const gltfLoader = new GLTFLoader()
+
+const animations = {
+  default: function () {
+      setAction(animationActions[0])
+  },
+  cheering: function () {
+      setAction(animationActions[1])
+  },
+  standing: function () {
+      setAction(animationActions[2])
+  },
+  running: function () {
+      setAction(animationActions[3])
+  },
+  walking: function(){
+    setAction(animationActions[4])
+  }
+}
+
+const setAction = (toAction: THREE.AnimationAction) => {
+  if (toAction != activeAction) {
+      lastAction = activeAction
+      activeAction = toAction
+      //lastAction.stop()
+      lastAction.fadeOut(.5)
+      activeAction.reset()
+      activeAction.fadeIn(.5)
+      activeAction.play()
+  }
+}
+
+gltfLoader.load('models/FemaleTPose.glb', function (gltf) {
+    gltf.scene.traverse(function(child){
+      if ((child as THREE.Mesh).isMesh) {
           const m = (child as THREE.Mesh)
-          m.material = toonmaterial
+
+          switch(m.name){
+            case 'Beta_Surface':{
+              m.material = toonmaterial
+              break;
+            }
+            case 'Beta_Joints':{
+              m.material = toonjointmaterial
+              break;
+            }
+          }
+
           m.castShadow = true
       }
     })
-    scene.add(model)
-    model.scale.set(.05,.05,.05)
-    model.position.y = -1.5
+    
+    scene.add(gltf.scene)
+    gltf.scene.position.y = -1.5
 
-    mixer = new THREE.AnimationMixer(model)
+    mixer = new THREE.AnimationMixer(gltf.scene)
 
-    const clip = THREE.AnimationClip.findByName(model.animations, "mixamo.com")
-    action = mixer.clipAction(clip)
-    action.play()     
+    const animationAction = mixer.clipAction((gltf as any).animations[0])
+    animationActions.push(animationAction)
+    animationsFolder.add(animations, 'default')
+    activeAction = animationActions[0]
+    gltf.scene.scale.set(5,5,5)
+
+    modelMesh = gltf.scene
+
+    gltfLoader.load('models/animations/cheering.glb',(gltf) => {
+            console.log('loaded cheering')
+            const animationAction = mixer.clipAction((gltf as any).animations[0])
+            animationActions.push(animationAction)
+            animationsFolder.add(animations, 'cheering')
+
+            gltfLoader.load('models/animations/standing.glb',(gltf) => {
+                    console.log('loaded standing')
+                    const animationAction = mixer.clipAction((gltf as any).animations[0])
+                    animationActions.push(animationAction)
+                    animationsFolder.add(animations, 'standing')
+
+                    gltfLoader.load('models/animations/running.glb',(gltf) => {
+                            console.log('loaded running');
+                            
+                            const animationAction = mixer.clipAction((gltf as any).animations[0])
+                            animationActions.push(animationAction)
+                            animationsFolder.add(animations, 'running')
+
+                            gltfLoader.load('models/animations/walking.glb',(gltf) => {
+                              console.log('loaded walking');
+                              
+                              const animationAction = mixer.clipAction((gltf as any).animations[0])
+                              animationActions.push(animationAction)
+                              animationsFolder.add(animations, 'walking')
+  
+                              modelReady = true
+
+                              animations.standing()
+                          },
+                          (xhr) => console.log((xhr.loaded / xhr.total) * 100 + '% loaded'),
+                          (error) => console.log(error)
+                        )},
+                        (xhr) => console.log((xhr.loaded / xhr.total) * 100 + '% loaded'),
+                        (error) => console.log(error)
+                    )
+                },
+                (xhr) => console.log((xhr.loaded / xhr.total) * 100 + '% loaded'),
+                (error) => console.log(error)
+            )
+        },
+        (xhr) => console.log((xhr.loaded / xhr.total) * 100 + '% loaded'),
+        (error) => (console.log(error))
+    )
   },
-  (xhr) => {
-      console.log((xhr.loaded / xhr.total) * 100 + '% loaded')
-  },
-  (error) => {
-      console.log(error)
-  }
+  (xhr) => console.log((xhr.loaded / xhr.total) * 100 + '% loaded'),
+  (error) => (console.log(error))
 )
 
 window.addEventListener('resize', onWindowResize, false)
@@ -166,16 +269,16 @@ cubeFolder.add(cube.rotation, "z", 0, Math.PI * 2)
 
 const directionalLightFolder = gui.addFolder('DirectionalLight')
 directionalLightFolder
-    .add(directionalLight.shadow.camera, 'left', -10, -1, 0.1)
+    .add(directionalLight.shadow.camera, 'left', -100, 100, 0.1)
     .onChange(() => directionalLight.shadow.camera.updateProjectionMatrix())
 directionalLightFolder
-    .add(directionalLight.shadow.camera, 'right', 1, 10, 0.1)
+    .add(directionalLight.shadow.camera, 'right', -100, 100, 0.1)
     .onChange(() => directionalLight.shadow.camera.updateProjectionMatrix())
 directionalLightFolder
-    .add(directionalLight.shadow.camera, 'top', 1, 10, 0.1)
+    .add(directionalLight.shadow.camera, 'top', -100, 100, 0.1)
     .onChange(() => directionalLight.shadow.camera.updateProjectionMatrix())
 directionalLightFolder
-    .add(directionalLight.shadow.camera, 'bottom', -10, -1, 0.1)
+    .add(directionalLight.shadow.camera, 'bottom', -100, 100, 0.1)
     .onChange(() => directionalLight.shadow.camera.updateProjectionMatrix())
 directionalLightFolder
     .add(directionalLight.shadow.camera, 'near', 0.1, 100)
@@ -200,6 +303,7 @@ const materialFolder = gui.addFolder('Material')
 
 interface Config {
   ToonColor: number;
+  ToonJointsColor : number;
   OutlineR: number;
   OutlineG: number;
   OutlineB: number;
@@ -213,6 +317,7 @@ interface Config {
 
 const config: Config = {
   "ToonColor" : 0x18BFE3,
+  "ToonJointsColor" : 0X1C5B72,
   "OutlineR": outlineConfig.defaultColor[0],
   "OutlineG": outlineConfig.defaultColor[1],
   "OutlineB": outlineConfig.defaultColor[2],
@@ -225,7 +330,11 @@ const config: Config = {
 }
 
 materialFolder.addColor(config, "ToonColor").onChange(function(e){
-  sphere.material.color.setHex(e)
+  toonmaterial.color.setHex(e)
+})
+
+materialFolder.addColor(config, "ToonJointsColor").onChange((e)=>{
+  toonjointmaterial.color.setHex(e)
 })
 
 materialFolder.add(config, "OutlineR", 0, 1, .01).onChange((e)=>{outline = new OutlineEffect( renderer, {defaultColor:[e,config.OutlineG,config.OutlineB]})})
@@ -262,22 +371,107 @@ backgroundGradientCustomization.addColor(config, "BGColor4").onChange((e)=>{
 })
 backgroundGradientCustomization.open()
 
+const animationsFolder = gui.addFolder('Animations')
+animationsFolder.open()
+
+
+const raycaster = new THREE.Raycaster()
+const targetQuaternion = new THREE.Quaternion()
+
+renderer.domElement.addEventListener('dblclick', onDoubleClick, false)
+
+function onDoubleClick(event: MouseEvent) {
+    
+    const mouse = {
+        x: (event.clientX / renderer.domElement.clientWidth) * 2 - 1,
+        y: -(event.clientY / renderer.domElement.clientHeight) * 2 + 1,
+    }
+
+    raycaster.setFromCamera(mouse, camera)
+
+    const intersects = raycaster.intersectObjects(sceneMeshes, false)
+
+    if (intersects.length > 0) {
+        const p = intersects[0].point
+
+        const distance = modelMesh.position.distanceTo(p)
+
+        const rotationMatrix = new THREE.Matrix4()
+        rotationMatrix.lookAt(p, modelMesh.position, modelMesh.up)
+        targetQuaternion.setFromRotationMatrix(rotationMatrix)
+
+        TWEEN.removeAll()
+        setAction(animationActions[3])
+        new TWEEN.Tween(modelMesh.position)
+          .to({
+            x: p.x,
+            y: p.y,
+            z: p.z
+          }, 200 / 2 * distance)
+          //.easing(TWEEN.Easing.Linear.None)
+          .start()
+          .onComplete(function(){
+            setAction(animationActions[2])
+          })
+    }
+}
+
+renderer.domElement.addEventListener("click", onClick)
+
+function onClick(e: MouseEvent) {
+
+  const mouse = {
+        x: (e.clientX / renderer.domElement.clientWidth) * 2 - 1,
+        y: -(e.clientY / renderer.domElement.clientHeight) * 2 + 1,
+    }
+    
+  raycaster.setFromCamera(mouse, camera)
+
+  const intersects = raycaster.intersectObjects(sceneMeshes, false)
+
+  if (intersects.length > 0) {
+    const p = intersects[0].point
+
+    const distance = modelMesh.position.distanceTo(p)
+
+    const rotationMatrix = new THREE.Matrix4()
+    rotationMatrix.lookAt(p, modelMesh.position, modelMesh.up)
+    targetQuaternion.setFromRotationMatrix(rotationMatrix)
+
+    TWEEN.removeAll()
+    animations.walking()
+
+    new TWEEN.Tween(modelMesh.position)
+      .to({
+        x: p.x,
+        y: p.y,
+        z: p.z
+      }, 400 / 2 * distance)
+      //.easing(TWEEN.Easing.Linear.None)
+      .start()
+      .onComplete(function(){
+        setAction(animationActions[2])
+      })
+  }
+}
+
 const clock = new THREE.Clock()
 function animate() {
 
     stats.update()
 
-    if(mixer)
-        mixer.update(clock.getDelta())
+    if (modelReady) {mixer.update(clock.getDelta())}
 
     // helper.update()
 
-    cube.rotation.x += 0.01
-    cube.rotation.y += 0.01
+    if(!modelMesh.quaternion.equals(targetQuaternion)){
+      modelMesh.quaternion.rotateTowards(targetQuaternion, clock.getDelta() * 400)
+    }
 
     camera.lookAt(new THREE.Vector3(0,3,0))
 
     outline.render(scene, camera)
+    TWEEN.update()
 
 }
 
